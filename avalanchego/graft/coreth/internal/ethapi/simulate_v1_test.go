@@ -118,3 +118,30 @@ func TestSimulateV1RPCRegistration(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestSimulateV1IncludesFlareDaemonLogs(t *testing.T) {
+	account := common.HexToAddress("0x1234")
+	contract := common.HexToAddress("0x5678")
+	daemon := common.HexToAddress("0x1000000000000000000000000000000000000002")
+	// Emit a daemon log and return a zero mint request.
+	daemonCode := common.FromHex("0x6002600052600160206000a1600060005260206000f3")
+	cfg := *params.TestChainConfig
+	cfg.ChainID = big.NewInt(14)
+	genesis := &core.Genesis{Config: &cfg, Alloc: types.GenesisAlloc{
+		account:  {Balance: big.NewInt(params.Ether)},
+		contract: {Balance: big.NewInt(0), Code: common.FromHex("0x00")},
+		daemon:   {Balance: big.NewInt(0), Code: daemonCode},
+	}}
+	backend := newTestBackend(t, 1, genesis, dummy.NewCoinbaseFaker(), func(int, *core.BlockGen) {})
+	api := NewBlockChainAPI(simV1TestBackend{backend})
+	gas := hexutil.Uint64(100000)
+	call := TransactionArgs{From: &account, To: &contract, Gas: &gas}
+	out, err := api.SimulateV1(context.Background(), simV1Options{BlockStateCalls: []simV1Block{{Calls: []TransactionArgs{call}}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := out[0].Calls[0].Logs
+	if len(logs) != 1 || logs[0].Address != daemon {
+		t.Fatalf("expected daemon log: %+v", logs)
+	}
+}

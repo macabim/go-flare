@@ -119,6 +119,36 @@ func TestSimulateV1RPCRegistration(t *testing.T) {
 	}
 }
 
+func TestSimulateV1RPCSequentialCalls(t *testing.T) {
+	account := common.HexToAddress("0x1234")
+	contract := common.HexToAddress("0x5678")
+	genesis := &core.Genesis{Config: params.TestChainConfig, Alloc: types.GenesisAlloc{
+		account:  {Balance: big.NewInt(params.Ether)},
+		contract: {Code: common.FromHex("0x60005460010160005560005460005260206000f3")},
+	}}
+	backend := newTestBackend(t, 1, genesis, dummy.NewCoinbaseFaker(), func(int, *core.BlockGen) {})
+	server := rpc.NewServer(time.Second)
+	if err := server.RegisterName("eth", NewBlockChainAPI(simV1TestBackend{backend})); err != nil {
+		t.Fatal(err)
+	}
+	client := rpc.DialInProc(server)
+	defer client.Close()
+	gas := hexutil.Uint64(100000)
+	call := TransactionArgs{From: &account, To: &contract, Gas: &gas}
+	var result []simV1BlockResult
+	if err := client.Call(&result, "eth_simulateV1", simV1Options{BlockStateCalls: []simV1Block{{Calls: []TransactionArgs{call, call}}}}, "latest"); err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 1 || len(result[0].Calls) != 2 {
+		t.Fatalf("unexpected RPC response: %+v", result)
+	}
+	for i, callResult := range result[0].Calls {
+		if callResult.Status != 1 || new(big.Int).SetBytes(callResult.ReturnData).Uint64() != uint64(i+1) || callResult.GasUsed == 0 {
+			t.Fatalf("RPC call %d: %+v", i, callResult)
+		}
+	}
+}
+
 func TestSimulateV1IncludesFlareDaemonLogs(t *testing.T) {
 	account := common.HexToAddress("0x1234")
 	contract := common.HexToAddress("0x5678")

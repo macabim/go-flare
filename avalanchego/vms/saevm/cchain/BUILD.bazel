@@ -123,6 +123,7 @@ go_test(
         "hooks_test.go",
         "metrics_test.go",
         "pchaingateway_flare_test.go",
+        "simulate_v1_flare_test.go",
         "statesync_test.go",
         "trace_flare_test.go",
         "vm_test.go",

@@ -174,56 +174,10 @@ func applyTransactionWithExtras(msg *core.Message, config *params.ChainConfig, g
 	txContext := core.NewEVMTxContext(msg)
 	evm.Reset(txContext, statedb)
 
-	txSnapshot := statedb.Snapshot() // revert if the daemon invalidates execution
-
-	// Apply the transaction to the current state (included in the env).
-	result, err := core.ApplyMessage(evm, msg, gp)
+	result, err := applyMessageWithExtras(evm, statedb, msg, gp, extras)
 	if err != nil {
 		return nil, err
 	}
-
-	// Flare-specific features, mirroring the pre-Helicon
-	// coreth StateTransition.TransitionDb. Both insertions MUST stay before
-	// statedb.Finalise/IntermediateRoot (Finalise invalidates snapshot
-	// revisions) and before GetLogs (so daemon logs reach the receipt).
-
-	// Feature 1/2: relocate the fee that core.ApplyMessage credited to the
-	// coinbase into the burn address (0x…dEaD on Flare; on Songbird the burn
-	// address is the coinbase itself, so the move is a no-op). This applies
-	// to failed transactions too. For prioritised contract calls only the
-	// nominal fee is burned and the excess is returned to the sender. The
-	// gas-cap check inside IsPrioritisedContractCall receives the transaction
-	// gas limit, matching the pre-Helicon st.initialGas semantics.
-	prioritised := result.Err == nil &&
-		dcore.IsPrioritisedContractCall(config.ChainID, evm.Context.Time, msg.To, msg.Data, result.ReturnData, msg.GasLimit)
-	if err := settleFees(statedb, evm.Context.Coinbase, msg, result, prioritised, extras); err != nil {
-		return nil, err
-	}
-
-	if result.Err == nil && extras.CallDaemon {
-		// Feature 2/2: daemon call with a free, fixed gas allowance. Errors
-		// are deliberately ignored (logged inside AtomicDaemonAndMint):
-		// DaemonCall snapshots before the call and AtomicDaemonAndMint
-		// reverts on mint failure, leaving the transaction and receipt
-		// untouched. No evm.Reset here — it would corrupt
-		// receipt.ContractAddress (built below from evm.TxContext.Origin) for
-		// creation transactions.
-		evmCaller := &daemonEvmCaller{
-			evm:   evm,
-			state: statedb,
-		}
-
-		dcore.AtomicDaemonAndMint(evmCaller, log.Root())
-
-		// The daemon runs after core.ApplyMessage, so libevm's only
-		// invalidation check (inside TransitionDb) cannot observe a
-		// daemon-triggered vm.EVM.InvalidateExecution
-		if err := evm.ExecutionInvalidated(); err != nil {
-			statedb.RevertToSnapshot(txSnapshot)
-			return nil, fmt.Errorf("execution invalidated: %w", err)
-		}
-	}
-	// End of Flare-specific features.
 
 	// Update the state with pending changes.
 	var root []byte
@@ -262,6 +216,73 @@ func applyTransactionWithExtras(msg *core.Message, config *params.ChainConfig, g
 	receipt.BlockNumber = blockNumber
 	receipt.TransactionIndex = uint(statedb.TxIndex())
 	return receipt, err
+}
+
+// ApplyMessageWithExtras applies msg like [core.ApplyMessage], with the Flare
+// fee settlement and daemon call of Helicon and later blocks. RPC simulations
+// use it to get the same state changes and logs as live execution.
+func ApplyMessageWithExtras(evm *vm.EVM, statedb *state.StateDB, msg *core.Message, gp *core.GasPool) (*core.ExecutionResult, error) {
+	extras, err := NewExtrasConfig(evm.ChainConfig().ChainID, evm.Context.Coinbase)
+	if err != nil {
+		return nil, err
+	}
+	return applyMessageWithExtras(evm, statedb, msg, gp, extras)
+}
+
+// applyMessageWithExtras is the message part of [applyTransactionWithExtras]:
+// core.ApplyMessage followed by the Flare-specific features.
+func applyMessageWithExtras(evm *vm.EVM, statedb *state.StateDB, msg *core.Message, gp *core.GasPool, extras *ExtrasConfig) (*core.ExecutionResult, error) {
+	txSnapshot := statedb.Snapshot() // revert if the daemon invalidates execution
+
+	// Apply the transaction to the current state (included in the env).
+	result, err := core.ApplyMessage(evm, msg, gp)
+	if err != nil {
+		return nil, err
+	}
+
+	// Flare-specific features, mirroring the pre-Helicon
+	// coreth StateTransition.TransitionDb. Both insertions MUST stay before
+	// statedb.Finalise/IntermediateRoot (Finalise invalidates snapshot
+	// revisions) and before GetLogs (so daemon logs reach the receipt).
+
+	// Feature 1/2: relocate the fee that core.ApplyMessage credited to the
+	// coinbase into the burn address (0x…dEaD on Flare; on Songbird the burn
+	// address is the coinbase itself, so the move is a no-op). This applies
+	// to failed transactions too. For prioritised contract calls only the
+	// nominal fee is burned and the excess is returned to the sender. The
+	// gas-cap check inside IsPrioritisedContractCall receives the transaction
+	// gas limit, matching the pre-Helicon st.initialGas semantics.
+	prioritised := result.Err == nil &&
+		dcore.IsPrioritisedContractCall(evm.ChainConfig().ChainID, evm.Context.Time, msg.To, msg.Data, result.ReturnData, msg.GasLimit)
+	if err := settleFees(statedb, evm.Context.Coinbase, msg, result, prioritised, extras); err != nil {
+		return nil, err
+	}
+
+	if result.Err == nil && extras.CallDaemon {
+		// Feature 2/2: daemon call with a free, fixed gas allowance. Errors
+		// are deliberately ignored (logged inside AtomicDaemonAndMint):
+		// DaemonCall snapshots before the call and AtomicDaemonAndMint
+		// reverts on mint failure, leaving the transaction and receipt
+		// untouched. No evm.Reset here — it would corrupt
+		// receipt.ContractAddress (built below from evm.TxContext.Origin) for
+		// creation transactions.
+		evmCaller := &daemonEvmCaller{
+			evm:   evm,
+			state: statedb,
+		}
+
+		dcore.AtomicDaemonAndMint(evmCaller, log.Root())
+
+		// The daemon runs after core.ApplyMessage, so libevm's only
+		// invalidation check (inside TransitionDb) cannot observe a
+		// daemon-triggered vm.EVM.InvalidateExecution
+		if err := evm.ExecutionInvalidated(); err != nil {
+			statedb.RevertToSnapshot(txSnapshot)
+			return nil, fmt.Errorf("execution invalidated: %w", err)
+		}
+	}
+	// End of Flare-specific features.
+	return result, nil
 }
 
 // settleFees relocates the transaction fee that core.ApplyMessage credited to

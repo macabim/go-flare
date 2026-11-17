@@ -6,6 +6,7 @@ package cchain
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/ava-labs/avalanchego/vms/platformvm/warp/payload"
 	"github.com/ava-labs/avalanchego/vms/saevm/sae/rpc"
 	"github.com/ava-labs/avalanchego/vms/saevm/saedb"
+	"github.com/ava-labs/avalanchego/vms/saevm/saetest"
 )
 
 func TestParseConfig(t *testing.T) {
@@ -226,6 +228,21 @@ func TestParseConfig(t *testing.T) {
 				c.WarpOffChainMessages = []hexutil.Bytes{{0x12, 0x34}}
 			}),
 		},
+		{
+			name: "api/rpc_tx_fee_cap",
+			json: `{"rpc-tx-fee-cap":1000}`,
+			want: with(func(c *config) { c.RPCTxFeeCap = 1000 }),
+		},
+		{
+			name: "api/rpc_tx_fee_cap_explicit_zero",
+			json: `{"rpc-tx-fee-cap":0}`,
+			want: with(func(c *config) { c.RPCTxFeeCap = 0 }),
+		},
+		{
+			name:    "api/rpc_tx_fee_cap_negative",
+			json:    `{"rpc-tx-fee-cap":-1}`,
+			wantErr: testerr.Is(rpc.ErrNegativeTxFeeCap),
+		},
 
 		// State sync
 		{
@@ -278,6 +295,7 @@ func TestParseConfig(t *testing.T) {
 				"state-sync-enabled":false,
 				"warp-off-chain-messages":["0x1234"],
 				"api-resolve-pending-to-last-executed":true,
+				"rpc-tx-fee-cap":250,
 				"state-sync-ids":["` + nodeID.String() + `"]
 			}`,
 			want: config{
@@ -299,6 +317,7 @@ func TestParseConfig(t *testing.T) {
 				APIMaxDuration:               duration{30 * time.Second},
 				WarpOffChainMessages:         []hexutil.Bytes{{0x12, 0x34}},
 				ResolvePendingToLastExecuted: true,
+				RPCTxFeeCap:                  250,
 				StateSyncEnabled:             false,
 				internalConfig: internalConfig{
 					StateSyncIDs: set.Of(nodeID),
@@ -459,6 +478,66 @@ func TestConfigResolvePendingToLastExecuted(t *testing.T) {
 				return
 			}
 			assert.Equalf(t, code, got, "%T.PendingCodeAt(%v)", sut.ethclient, addr)
+		})
+	}
+}
+
+func TestConfigRPCTxFeeCap(t *testing.T) {
+	// This test exercises plumbing of the config into the RPC submission
+	// check. Gas times gas fee cap is 150 AVAX.
+	const (
+		gasLimit  = 1_000_000
+		gasFeeCap = 150_000_000_000_000
+	)
+
+	tests := []struct {
+		name    string
+		opt     func(*sutConfig)
+		wantErr testerr.Want
+	}{
+		{
+			name:    "default_cap",
+			opt:     func(*sutConfig) {},
+			wantErr: testerr.Contains("exceeds the configured cap"),
+		},
+		{
+			name: "fee_at_cap",
+			opt: func(c *sutConfig) {
+				c.vmConfig.RPCTxFeeCap = 150
+			},
+		},
+		{
+			name: "raised_cap",
+			opt: func(c *sutConfig) {
+				c.vmConfig.RPCTxFeeCap = 1000
+			},
+		},
+		{
+			name: "no_cap",
+			opt: func(c *sutConfig) {
+				c.vmConfig.RPCTxFeeCap = 0
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := saetest.NewUNSAFEWallet(t, 1, types.LatestSigner(saetest.ChainConfig()))
+			ctx, sut := newSUT(t,
+				withMaxAllocFor(w.Addresses()...),
+				options.Func[sutConfig](tt.opt),
+			)
+
+			to := common.Address{'c', 'a', 'p'}
+			tx := w.SetNonceAndSign(t, 0, &types.DynamicFeeTx{
+				To:        &to,
+				Gas:       gasLimit,
+				GasFeeCap: big.NewInt(gasFeeCap),
+			})
+			err := sut.ethclient.SendTransaction(ctx, tx)
+			if diff := testerr.Diff(err, tt.wantErr); diff != "" {
+				t.Fatalf("%T.SendTransaction(...) error (-want +got)\n%s", sut.ethclient, diff)
+			}
 		})
 	}
 }

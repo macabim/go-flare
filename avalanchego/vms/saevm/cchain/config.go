@@ -103,6 +103,11 @@ type config struct {
 	// Non-positive values result in no limit. Defaults to no limit.
 	APIMaxDuration               duration `json:"api-max-duration"`
 	ResolvePendingToLastExecuted bool     `json:"api-resolve-pending-to-last-executed"`
+	// RPCTxFeeCap is the maximum fee (gas limit times gas fee cap), in AVAX
+	// (FLR on Flare), of a transaction submitted through eth_sendRawTransaction or
+	// eth_sendTransaction; 0 = no cap. It is local submission policy only:
+	// consensus and gossip do not check it.
+	RPCTxFeeCap float64 `json:"rpc-tx-fee-cap"`
 
 	// State sync
 	StateSyncEnabled bool `json:"state-sync-enabled"`
@@ -136,6 +141,7 @@ func defaultConfig() config {
 		APIs:                         rpc.DefaultAPIs(),
 		BatchRequestLimit:            1000, // matches geth / libevm's node.DefaultConfig
 		ResolvePendingToLastExecuted: true, // support Foundry's cast and geth/libevm's bound contracts
+		RPCTxFeeCap:                  100,
 	}
 }
 
@@ -240,11 +246,10 @@ func (c config) saeConfig(now func() time.Time) sae.Config {
 			AllowUnprotectedTxs: c.AllowUnprotectedTxs,
 			BatchRequestLimit:   c.BatchRequestLimit,
 			EVMTimeout:          c.APIMaxDuration.Duration,
-			// GasCap and TxFeeCap are set to reasonable values for mainnet
-			// C-Chain. They are left unconfigurable to minimize the size of the
-			// user config.
+			// GasCap is set to a reasonable value for mainnet C-Chain. It is
+			// left unconfigurable to minimize the size of the user config.
 			GasCap:                       50_000_000,
-			TxFeeCap:                     100,
+			TxFeeCap:                     c.RPCTxFeeCap,
 			ResolvePendingToLastExecuted: c.ResolvePendingToLastExecuted,
 		},
 		Now: now,

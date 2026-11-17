@@ -85,12 +85,17 @@ var (
 	ErrBatchRequestLimitTooLarge = errors.New("batch request limit exceeds max")
 	// ErrUnknownAPI means [Config.APIs] contains an API that doesn't exist.
 	ErrUnknownAPI = errors.New("unknown API")
+	// ErrNegativeTxFeeCap means [Config.TxFeeCap] is below 0.
+	ErrNegativeTxFeeCap = errors.New("negative tx fee cap")
 )
 
 // Verify checks that all values in c are within usable bounds.
 func (c Config) Verify() error {
 	if c.BatchRequestLimit > math.MaxInt {
 		return fmt.Errorf("%w: %d > %d", ErrBatchRequestLimitTooLarge, c.BatchRequestLimit, math.MaxInt)
+	}
+	if c.TxFeeCap < 0 {
+		return fmt.Errorf("%w: %v", ErrNegativeTxFeeCap, c.TxFeeCap)
 	}
 	known := AllAPIs()
 	for a := range c.APIs {

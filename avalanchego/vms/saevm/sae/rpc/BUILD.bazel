@@ -16,6 +16,7 @@ go_library(
         "receipts.go",
         "rpc.go",
         "server.go",
+        "simulate_v1.go",
         "stateful.go",
         "static.go",
         "subscriptions.go",

@@ -82,15 +82,13 @@ type config struct {
 	AllowMissingTries bool   `json:"allow-missing-tries"` // If enabled, checks preventing an incomplete trie index are skipped.
 	// PopulateMissingTries *uint64 `json:"populate-missing-tries,omitempty"`
 	// OfflinePruning       bool    `json:"offline-pruning-enabled"`
-	StateScheme string `json:"state-scheme"`
+	StateScheme  string `json:"state-scheme"`
+	StateHistory uint64 `json:"state-history"` // Number of recent states to guarantee. Defaults to core.TriesInMemory.
 
 	// Transaction pool
 	LocalTxsEnabled    bool   `json:"local-txs-enabled"`
 	TxPoolAccountSlots uint64 `json:"tx-pool-account-slots"`
 	TxPoolGlobalSlots  uint64 `json:"tx-pool-global-slots"`
-
-	// APIs
-	// MaxBlocksPerRequest int64  `json:"api-max-blocks-per-request"`
 
 	// APIs is the exhaustive set of JSON-RPC APIs this node serves. Methods of
 	// any other API return "method not found".
@@ -99,10 +97,13 @@ type config struct {
 	// BatchRequestLimit is the maximum number of requests per JSON-RPC batch;
 	// 0 = no limit. An unset config uses the default (1000).
 	BatchRequestLimit uint64 `json:"batch-request-limit"`
-	// APIMaxDuration limits how long an eth_call (or eth_callDetailed) runs.
-	// Non-positive values result in no limit. Defaults to no limit.
-	APIMaxDuration               duration `json:"api-max-duration"`
-	ResolvePendingToLastExecuted bool     `json:"api-resolve-pending-to-last-executed"`
+	// APIMaxDuration limits how long each call to the /rpc and /ws endpoints
+	// runs. Non-positive values result in no limit. Defaults to no limit.
+	APIMaxDuration duration `json:"api-max-duration"`
+	// MaxBlocksPerRequest is the maximum block range (inclusive) that can be
+	// used in an eth_getLogs request.
+	MaxBlocksPerRequest          uint64 `json:"api-max-blocks-per-request"`
+	ResolvePendingToLastExecuted bool   `json:"api-resolve-pending-to-last-executed"`
 	// RPCTxFeeCap is the maximum fee (gas limit times gas fee cap), in AVAX
 	// (FLR on Flare), of a transaction submitted through eth_sendRawTransaction or
 	// eth_sendTransaction; 0 = no cap. It is local submission policy only:
@@ -118,7 +119,6 @@ type config struct {
 	WarpOffChainMessages []hexutil.Bytes `json:"warp-off-chain-messages"`
 
 	internalConfig
-	deprecatedConfig
 }
 
 // internalConfig holds undocumented, test-only options, kept out of config.md.
@@ -162,14 +162,6 @@ func parseConfig(snowCtx *snow.Context, b []byte) (config, error) {
 	}
 	if err := json.Unmarshal(b, &c); err != nil {
 		return config{}, fmt.Errorf("json.Unmarshal(%T): %w", c, err)
-	}
-
-	// TODO(JonathanOppenheimer): delete together with deprecated.go.
-	if c.EthAPIs != nil {
-		_, apisSet := keys["apis"]
-		if err := c.applyDeprecatedAPINames(snowCtx.Log, apisSet); err != nil {
-			return config{}, err
-		}
 	}
 
 	var unrecognized []string
@@ -240,12 +232,14 @@ func (c config) saeConfig(now func() time.Time) sae.Config {
 			CommitInterval:    c.CommitInterval,
 			SnapshotCacheMiB:  c.SnapshotCache,
 			AllowMissingTries: c.AllowMissingTries,
+			StateHistory:      c.StateHistory,
 		},
 		RPCConfig: rpc.Config{
 			APIs:                c.APIs,
 			AllowUnprotectedTxs: c.AllowUnprotectedTxs,
 			BatchRequestLimit:   c.BatchRequestLimit,
-			EVMTimeout:          c.APIMaxDuration.Duration,
+			CallTimeout:         c.APIMaxDuration.Duration,
+			MaxBlocksPerRequest: c.MaxBlocksPerRequest,
 			// GasCap is set to a reasonable value for mainnet C-Chain. It is
 			// left unconfigurable to minimize the size of the user config.
 			GasCap:                       50_000_000,

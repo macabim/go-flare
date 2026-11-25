@@ -21,7 +21,6 @@ import (
 
 // These tests cover the SAE eth_simulateV1 (sae/rpc/simulate_v1.go) over the
 // real RPC transport, with the request and response shapes that Trader uses.
-// They mirror graft/coreth/internal/ethapi/simulate_v1_test.go.
 
 var (
 	simAccount = common.HexToAddress("0x1234")

@@ -24,10 +24,8 @@ import (
 	"github.com/ava-labs/avalanchego/vms/saevm/saexec"
 )
 
-// simV1Options implements the one-block simulation used by Trader. It is the
-// SAE version of graft/coreth/internal/ethapi/simulate_v1.go and keeps the same
-// request, response and limits. Unsupported extensions are rejected instead of
-// silently ignored.
+// simV1Options implements the one-block simulation used by Trader.
+// Unsupported extensions are rejected instead of silently ignored.
 type simV1Options struct {
 	BlockStateCalls        []simV1Block `json:"blockStateCalls"`
 	Validation             bool         `json:"validation"`

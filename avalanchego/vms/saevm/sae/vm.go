@@ -116,6 +116,9 @@ type Config struct {
 	// push-gossip message. The zero value defaults to the top 90% of stake plus
 	// 100 uniformly sampled validators.
 	PushGossipParams gossip.BranchingFactor
+	// Flare: PushGossipRelay also push-gossips the transactions received from
+	// gossip; see [txgossip.Set.RelayGossip].
+	PushGossipRelay bool
 
 	// Now defaults to [time.Now] if nil
 	Now func() time.Time `json:"-"`
@@ -306,6 +309,11 @@ func newGossipMempool(
 	if err != nil {
 		return nil, nil, fmt.Errorf("gossip.NewSystem(...): %v", err)
 	}
+	// The gossip handler calls the mempool, so it registers last.
+	mempool.RegisterPushGossiper(pushGossiper)
+	if cfg.PushGossipRelay {
+		mempool.RelayGossip()
+	}
 	if err := network.AddHandler(p2p.TxGossipHandlerID, handler); err != nil {
 		return nil, nil, fmt.Errorf("network.AddHandler(...): %v", err)
 	}
@@ -325,7 +333,6 @@ func newGossipMempool(
 		gossip.Every(gossipCtx, snowCtx.Log, pushGossiper, pushGossipPeriod)
 	})
 
-	mempool.RegisterPushGossiper(pushGossiper)
 	closers.Push(unwind.CloserFunc(func() error {
 		cancel()
 		wg.Wait()

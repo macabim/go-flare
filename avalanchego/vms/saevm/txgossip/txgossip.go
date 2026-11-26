@@ -67,6 +67,9 @@ type Set struct {
 
 	set    *txSet
 	pushTo []func(...Transaction)
+	// Flare: relay push-gossips the transactions that the pool accepts from
+	// gossip; see [Set.RelayGossip].
+	relay bool
 }
 
 // NewSet returns a new Set. Use [gossip.BloomSet.Add] or [Set.SendTx] to add

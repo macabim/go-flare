@@ -56,6 +56,14 @@ Unrecognized options — a typo, or an option of the pre-SAE C-Chain that no lon
 | `tx-pool-account-slots` | uint64 | Maximum number of executable transaction slots per account. | `16` |
 | `tx-pool-global-slots` | uint64 | Maximum number of executable transaction slots for all accounts. | `5120` |
 
+## Transaction Gossip
+
+| Option | Type | Description | Default |
+|--------|------|-------------|---------|
+| `push-gossip-frequency` | duration | Interval at which the node pushes transactions received through the RPC to validators. A transaction waits up to this long before the first push. Accepts a [Go duration string](https://pkg.go.dev/time#ParseDuration) (e.g. `"10ms"`). A non-positive value is a fatal configuration error. | `"100ms"` |
+| `push-gossip-percent-stake` | float | Share of total stake, taken from the largest validators first, that receives each push. A value outside `[0, 1]` is a fatal configuration error. | `0.9` |
+| `push-gossip-num-validators` | int | Number of uniformly sampled validators that receive each push in addition to `push-gossip-percent-stake`. A value below `1` is a fatal configuration error. | `100` |
+
 ## APIs
 
 | Option | Type | Description | Default |

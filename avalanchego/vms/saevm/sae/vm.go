@@ -107,9 +107,23 @@ type Config struct {
 	DBConfig      saedb.Config
 	RPCConfig     rpc.Config
 
+	// Flare: PushGossipPeriod is the interval of the transaction push-gossip
+	// loop. A transaction submitted through the RPC waits up to this long
+	// before it is sent to validators. Zero defaults to
+	// [DefaultPushGossipPeriod].
+	PushGossipPeriod time.Duration
+	// Flare: PushGossipParams selects the validators that receive each
+	// push-gossip message. The zero value defaults to the top 90% of stake plus
+	// 100 uniformly sampled validators.
+	PushGossipParams gossip.BranchingFactor
+
 	// Now defaults to [time.Now] if nil
 	Now func() time.Time `json:"-"`
 }
+
+// DefaultPushGossipPeriod is the transaction push-gossip interval when
+// [Config.PushGossipPeriod] is zero.
+const DefaultPushGossipPeriod = 100 * time.Millisecond
 
 // NewVM returns a new [VM] that is ready for use immediately upon return.
 // [VM.Shutdown] MUST be called to release resources.
@@ -179,7 +193,7 @@ func NewVM[T hook.Transaction](
 	)
 
 	// ==========  Mempool & P2P Gossip  ==========
-	pool, mempoolClosers, err := newGossipMempool(cfg.MempoolConfig, snowCtx, network, exec, ethBlockSource(consensusCritical, db), reg)
+	pool, mempoolClosers, err := newGossipMempool(cfg, snowCtx, network, exec, ethBlockSource(consensusCritical, db), reg)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +258,7 @@ func NewVM[T hook.Transaction](
 // resources and goroutines created by this function; the last closer stops
 // the gossip loops, blocking until they have returned.
 func newGossipMempool(
-	config legacypool.Config,
+	cfg Config,
 	snowCtx *snow.Context,
 	network *network.Network,
 	exec *saexec.Executor,
@@ -256,7 +270,7 @@ func newGossipMempool(
 
 	bc := txgossip.NewBlockChain(exec, blockSource)
 	pools := []txpool.SubPool{
-		legacypool.New(config, bc),
+		legacypool.New(cfg.MempoolConfig, bc),
 	}
 	txPool, err := txpool.New(0, bc, pools)
 	if err != nil {
@@ -282,10 +296,11 @@ func newGossipMempool(
 		mempool,
 		txgossip.Marshaller{},
 		gossip.SystemConfig{
-			Log:           snowCtx.Log,
-			Registry:      reg,
-			Namespace:     "gossip",
-			RequestPeriod: pullGossipPeriod,
+			Log:              snowCtx.Log,
+			Registry:         reg,
+			Namespace:        "gossip",
+			RequestPeriod:    pullGossipPeriod,
+			PushGossipParams: cfg.PushGossipParams,
 		},
 	)
 	if err != nil {
@@ -302,8 +317,11 @@ func newGossipMempool(
 	wg.Go(func() {
 		gossip.Every(gossipCtx, snowCtx.Log, pullGossiper, pullGossipPeriod)
 	})
+	pushGossipPeriod := cfg.PushGossipPeriod
+	if pushGossipPeriod == 0 {
+		pushGossipPeriod = DefaultPushGossipPeriod
+	}
 	wg.Go(func() {
-		const pushGossipPeriod = 100 * time.Millisecond
 		gossip.Every(gossipCtx, snowCtx.Log, pushGossiper, pushGossipPeriod)
 	})
 

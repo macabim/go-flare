@@ -147,6 +147,7 @@ go_test(
         "//ids",
         "//network/p2p",
         "//network/p2p/acp118",
+        "//network/p2p/gossip",
         "//proto/pb/sdk",
         "//snow",
         "//snow/engine/common",

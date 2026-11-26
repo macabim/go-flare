@@ -20,6 +20,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ava-labs/avalanchego/ids"
+	"github.com/ava-labs/avalanchego/network/p2p/gossip"
 	"github.com/ava-labs/avalanchego/snow"
 	"github.com/ava-labs/avalanchego/utils"
 	"github.com/ava-labs/avalanchego/utils/constants"
@@ -249,6 +250,32 @@ func TestParseConfig(t *testing.T) {
 			wantErr: testerr.Is(rpc.ErrNegativeTxFeeCap),
 		},
 
+		// Transaction gossip
+		{
+			name: "gossip/push_gossip",
+			json: `{"push-gossip-frequency":"5ms","push-gossip-percent-stake":1,"push-gossip-num-validators":200}`,
+			want: with(func(c *config) {
+				c.PushGossipFrequency = duration{5 * time.Millisecond}
+				c.PushGossipPercentStake = 1
+				c.PushGossipNumValidators = 200
+			}),
+		},
+		{
+			name:    "gossip/push_gossip_frequency_zero",
+			json:    `{"push-gossip-frequency":"0s"}`,
+			wantErr: testerr.Is(errPushGossipFrequency),
+		},
+		{
+			name:    "gossip/push_gossip_percent_stake_above_one",
+			json:    `{"push-gossip-percent-stake":1.5}`,
+			wantErr: testerr.Is(errPushGossipPercentStake),
+		},
+		{
+			name:    "gossip/push_gossip_num_validators_negative",
+			json:    `{"push-gossip-num-validators":-1}`,
+			wantErr: testerr.Is(gossip.ErrInvalidNumValidators),
+		},
+
 		// State sync
 		{
 			name: "state_sync_enabled",
@@ -302,6 +329,9 @@ func TestParseConfig(t *testing.T) {
 				"warp-off-chain-messages":["0x1234"],
 				"api-resolve-pending-to-last-executed":true,
 				"rpc-tx-fee-cap":250,
+				"push-gossip-frequency":"10ms",
+				"push-gossip-percent-stake":0.5,
+				"push-gossip-num-validators":20,
 				"state-sync-ids":["` + nodeID.String() + `"]
 			}`,
 			want: config{
@@ -325,6 +355,9 @@ func TestParseConfig(t *testing.T) {
 				WarpOffChainMessages:         []hexutil.Bytes{{0x12, 0x34}},
 				ResolvePendingToLastExecuted: true,
 				RPCTxFeeCap:                  250,
+				PushGossipFrequency:          duration{10 * time.Millisecond},
+				PushGossipPercentStake:       0.5,
+				PushGossipNumValidators:      20,
 				StateSyncEnabled:             false,
 				internalConfig: internalConfig{
 					StateSyncIDs: set.Of(nodeID),

@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ava-labs/avalanchego/ids"
+	"github.com/ava-labs/avalanchego/network/p2p/gossip"
 	"github.com/ava-labs/avalanchego/snow"
 	"github.com/ava-labs/avalanchego/utils/constants"
 	"github.com/ava-labs/avalanchego/utils/set"
@@ -110,6 +111,18 @@ type config struct {
 	// consensus and gossip do not check it.
 	RPCTxFeeCap float64 `json:"rpc-tx-fee-cap"`
 
+	// Transaction gossip
+	// Flare: PushGossipFrequency is the interval at which the node pushes
+	// transactions received through the RPC to validators.
+	PushGossipFrequency duration `json:"push-gossip-frequency"`
+	// Flare: PushGossipPercentStake is the share of total stake, taken from
+	// the largest validators first, that receives each push-gossip message.
+	PushGossipPercentStake float64 `json:"push-gossip-percent-stake"`
+	// Flare: PushGossipNumValidators is the number of uniformly sampled
+	// validators that receive each push-gossip message in addition to
+	// [config.PushGossipPercentStake].
+	PushGossipNumValidators int `json:"push-gossip-num-validators"`
+
 	// State sync
 	StateSyncEnabled bool `json:"state-sync-enabled"`
 
@@ -142,8 +155,16 @@ func defaultConfig() config {
 		BatchRequestLimit:            1000, // matches geth / libevm's node.DefaultConfig
 		ResolvePendingToLastExecuted: true, // support Foundry's cast and geth/libevm's bound contracts
 		RPCTxFeeCap:                  100,
+		PushGossipFrequency:          duration{sae.DefaultPushGossipPeriod},
+		PushGossipPercentStake:       .9,
+		PushGossipNumValidators:      100,
 	}
 }
+
+var (
+	errPushGossipFrequency    = errors.New("push-gossip-frequency must be positive")
+	errPushGossipPercentStake = errors.New("push-gossip-percent-stake must be in [0, 1]")
+)
 
 var errProductionCommitInterval = fmt.Errorf("production networks must use the commit interval %d", saedb.DefaultCommitInterval)
 
@@ -180,6 +201,15 @@ func parseConfig(snowCtx *snow.Context, b []byte) (config, error) {
 	saeCfg := c.saeConfig(nil)
 	if err := saeCfg.RPCConfig.Verify(); err != nil {
 		return config{}, err
+	}
+	if saeCfg.PushGossipPeriod <= 0 {
+		return config{}, fmt.Errorf("%w: %s", errPushGossipFrequency, saeCfg.PushGossipPeriod)
+	}
+	if p := saeCfg.PushGossipParams.StakePercentage; p < 0 || p > 1 {
+		return config{}, fmt.Errorf("%w: %v", errPushGossipPercentStake, p)
+	}
+	if err := saeCfg.PushGossipParams.Verify(); err != nil {
+		return config{}, fmt.Errorf("push gossip: %w", err)
 	}
 	if err := saeCfg.DBConfig.Verify(); err != nil {
 		return config{}, err
@@ -245,6 +275,11 @@ func (c config) saeConfig(now func() time.Time) sae.Config {
 			GasCap:                       50_000_000,
 			TxFeeCap:                     c.RPCTxFeeCap,
 			ResolvePendingToLastExecuted: c.ResolvePendingToLastExecuted,
+		},
+		PushGossipPeriod: c.PushGossipFrequency.Duration,
+		PushGossipParams: gossip.BranchingFactor{
+			StakePercentage: c.PushGossipPercentStake,
+			Validators:      c.PushGossipNumValidators,
 		},
 		Now: now,
 	}

@@ -122,6 +122,10 @@ type config struct {
 	// validators that receive each push-gossip message in addition to
 	// [config.PushGossipPercentStake].
 	PushGossipNumValidators int `json:"push-gossip-num-validators"`
+	// Flare: PushGossipRelay also pushes the transactions that the node
+	// receives from gossip, so they leave the node in arrival order with the
+	// transactions submitted through the RPC.
+	PushGossipRelay bool `json:"push-gossip-relay"`
 
 	// State sync
 	StateSyncEnabled bool `json:"state-sync-enabled"`
@@ -281,7 +285,8 @@ func (c config) saeConfig(now func() time.Time) sae.Config {
 			StakePercentage: c.PushGossipPercentStake,
 			Validators:      c.PushGossipNumValidators,
 		},
-		Now: now,
+		PushGossipRelay: c.PushGossipRelay,
+		Now:             now,
 	}
 }
 

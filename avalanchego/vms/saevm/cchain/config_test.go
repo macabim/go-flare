@@ -261,6 +261,11 @@ func TestParseConfig(t *testing.T) {
 			}),
 		},
 		{
+			name: "gossip/push_gossip_relay",
+			json: `{"push-gossip-relay":true}`,
+			want: with(func(c *config) { c.PushGossipRelay = true }),
+		},
+		{
 			name:    "gossip/push_gossip_frequency_zero",
 			json:    `{"push-gossip-frequency":"0s"}`,
 			wantErr: testerr.Is(errPushGossipFrequency),

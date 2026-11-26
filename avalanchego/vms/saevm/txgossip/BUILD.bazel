@@ -33,7 +33,10 @@ go_library(
 
 go_test(
     name = "txgossip_test",
-    srcs = ["txgossip_test.go"],
+    srcs = [
+        "relay_flare_test.go",
+        "txgossip_test.go",
+    ],
     data = glob(["testdata/**"]),
     embed = [":txgossip"],
     deps = [
